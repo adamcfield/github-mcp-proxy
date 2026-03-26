@@ -50,8 +50,9 @@ export class GitHubMCP extends McpAgent {
         path: z.string().describe("File path relative to repo root, e.g. 'src/agents/customer-care/index.ts'"),
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        offset: z.number().optional().describe("Character offset to start reading from (for large files)"),
       },
-      async ({ path, branch, repo }) => {
+      async ({ path, branch, repo, offset }) => {
         const repoName = repo || DEFAULT_REPO;
         const ref = branch || "main";
         const res = await ghFetch(
@@ -77,8 +78,14 @@ export class GitHubMCP extends McpAgent {
         }
 
         const decoded = atob(data.content.replace(/\n/g, ""));
+        const CHUNK = 50000;
+        const start = offset || 0;
+        const slice = decoded.slice(start, start + CHUNK);
+        const suffix = decoded.length > start + CHUNK
+          ? `\n\n[File truncated at ${start + CHUNK} chars. ${decoded.length} chars total. Use path + offset params to read further sections.]`
+          : (start > 0 ? `\n\n[End of file. ${decoded.length} chars total.]` : "");
         return {
-          content: [{ type: "text" as const, text: decoded }],
+          content: [{ type: "text" as const, text: slice + suffix }],
         };
       }
     );
