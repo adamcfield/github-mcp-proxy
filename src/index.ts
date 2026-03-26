@@ -53,40 +53,48 @@ export class GitHubMCP extends McpAgent {
         offset: z.number().optional().describe("Character offset to start reading from (for large files)"),
       },
       async ({ path, branch, repo, offset }) => {
-        const repoName = repo || DEFAULT_REPO;
-        const ref = branch || "main";
-        const res = await ghFetch(
-          `/repos/${OWNER}/${repoName}/contents/${encodeURIComponent(path)}?ref=${ref}`,
-          pat
-        );
+        try {
+          const repoName = repo || DEFAULT_REPO;
+          const ref = branch || "main";
+          const res = await ghFetch(
+            `/repos/${OWNER}/${repoName}/contents/${encodeURIComponent(path)}?ref=${ref}`,
+            pat
+          );
 
-        if (!res.ok) {
-          const err = await res.text();
+          if (!res.ok) {
+            const err = await res.text();
+            return {
+              content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
+              isError: true,
+            };
+          }
+
+          const data = (await res.json()) as { content?: string; encoding?: string; size?: number; type?: string };
+
+          if (data.type !== "file" || !data.content) {
+            return {
+              content: [{ type: "text" as const, text: `Path '${path}' is a directory, not a file. Use list_files instead.` }],
+              isError: true,
+            };
+          }
+
+          // Strip ALL whitespace (handles \n, \r\n, spaces) before decoding
+          const decoded = atob(data.content.replace(/\s/g, ""));
+          const CHUNK = 50000;
+          const start = offset || 0;
+          const slice = decoded.slice(start, start + CHUNK);
+          const suffix = decoded.length > start + CHUNK
+            ? `\n\n[File truncated at ${start + CHUNK} chars. ${decoded.length} chars total. Use path + offset params to read further sections.]`
+            : (start > 0 ? `\n\n[End of file. ${decoded.length} chars total.]` : "");
           return {
-            content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
+            content: [{ type: "text" as const, text: slice + suffix }],
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `read_file error: ${err instanceof Error ? err.message : String(err)}` }],
             isError: true,
           };
         }
-
-        const data = (await res.json()) as { content?: string; encoding?: string; size?: number; type?: string };
-
-        if (data.type !== "file" || !data.content) {
-          return {
-            content: [{ type: "text" as const, text: `Path '${path}' is a directory, not a file. Use list_files instead.` }],
-            isError: true,
-          };
-        }
-
-        const decoded = atob(data.content.replace(/\n/g, ""));
-        const CHUNK = 50000;
-        const start = offset || 0;
-        const slice = decoded.slice(start, start + CHUNK);
-        const suffix = decoded.length > start + CHUNK
-          ? `\n\n[File truncated at ${start + CHUNK} chars. ${decoded.length} chars total. Use path + offset params to read further sections.]`
-          : (start > 0 ? `\n\n[End of file. ${decoded.length} chars total.]` : "");
-        return {
-          content: [{ type: "text" as const, text: slice + suffix }],
-        };
       }
     );
 
