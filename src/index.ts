@@ -707,6 +707,16 @@ export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
+    // ── Auth check ───────────────────────────────────────────────
+    // Skip for CORS preflight and health check.
+    // All MCP endpoints require Authorization: Bearer <PROXY_SECRET>.
+    if (env.PROXY_SECRET && request.method !== "OPTIONS" && url.pathname !== "/" && url.pathname !== "/health") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (auth !== `Bearer ${env.PROXY_SECRET}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+    }
+
     // Health check
     if (url.pathname === "/" || url.pathname === "/health") {
       return new Response(
