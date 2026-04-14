@@ -709,10 +709,14 @@ export default {
 
     // ── Auth check ───────────────────────────────────────────────
     // Skip for CORS preflight and health check.
-    // All MCP endpoints require Authorization: Bearer <PROXY_SECRET>.
+    // Accepts the secret via:
+    //   ?key=<PROXY_SECRET>  (query param — for Claude.ai connector URL)
+    //   Authorization: Bearer <PROXY_SECRET>  (header — for other clients)
     if (env.PROXY_SECRET && request.method !== "OPTIONS" && url.pathname !== "/" && url.pathname !== "/health") {
-      const auth = request.headers.get("Authorization") ?? "";
-      if (auth !== `Bearer ${env.PROXY_SECRET}`) {
+      const queryKey = url.searchParams.get("key") ?? "";
+      const authHeader = request.headers.get("Authorization") ?? "";
+      const valid = queryKey === env.PROXY_SECRET || authHeader === `Bearer ${env.PROXY_SECRET}`;
+      if (!valid) {
         return new Response("Unauthorized", { status: 401 });
       }
     }
