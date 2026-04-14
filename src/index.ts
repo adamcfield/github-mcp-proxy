@@ -78,8 +78,15 @@ export class GitHubMCP extends McpAgent {
             };
           }
 
-          // Strip ALL whitespace (handles \n, \r\n, spaces) before decoding
-          const decoded = atob(data.content.replace(/\s/g, ""));
+          // Decode base64 → raw bytes → UTF-8 string.
+          // atob() alone returns a Latin-1 binary string; non-ASCII bytes get
+          // JSON-escaped as \u00XX (6 chars each), inflating UTF-8-rich files
+          // up to 6× in JSON size and exceeding MCP client response limits.
+          // TextDecoder interprets the raw bytes as UTF-8 so each Unicode char
+          // stays a single char in JSON (e.g. → is "→", not "\u00e2\u0086\u0092").
+          const b64 = data.content.replace(/\s/g, "");
+          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          const decoded = new TextDecoder("utf-8").decode(bytes);
           const CHUNK = 50000;
           const start = offset || 0;
           const slice = decoded.slice(start, start + CHUNK);
