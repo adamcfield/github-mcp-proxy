@@ -701,47 +701,253 @@ export class GitHubMCP extends McpAgent {
   }
 }
 
+// ── OAuth 2.1 constants ───────────────────────────────────────────
+
+const BASE_URL  = "https://github-mcp-worker.adamcfield.workers.dev";
+const CODE_TTL  = 300;       // auth code TTL: 5 minutes
+const TOKEN_TTL = 2592000;   // access token TTL: 30 days
+
+// ── OAuth helpers ─────────────────────────────────────────────────
+
+function oauthJson(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+function oauthDiscovery(): Response {
+  return oauthJson({
+    issuer:                                 BASE_URL,
+    authorization_endpoint:                `${BASE_URL}/authorize`,
+    token_endpoint:                         `${BASE_URL}/token`,
+    registration_endpoint:                  `${BASE_URL}/register`,
+    revocation_endpoint:                    `${BASE_URL}/revoke`,
+    response_types_supported:              ["code"],
+    grant_types_supported:                 ["authorization_code"],
+    code_challenge_methods_supported:      ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
+  });
+}
+
+async function oauthRegister(request: Request, env: Env): Promise<Response> {
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const clientId = crypto.randomUUID();
+  const client = {
+    client_id:                  clientId,
+    client_name:                body.client_name || "Unknown",
+    redirect_uris:              body.redirect_uris || [],
+    grant_types:                ["authorization_code"],
+    response_types:             ["code"],
+    token_endpoint_auth_method: "none",
+    created_at:                 Date.now(),
+  };
+  await env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify(client), {
+    expirationTtl: 86400 * 365,
+  });
+  return oauthJson(client, 201);
+}
+
+function oauthAuthorizeGet(url: URL): Response {
+  const p = url.searchParams;
+  const H = (s: string) => String(s)
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GitHub MCP — Authorize</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+         background:#0d1117;font-family:Inter,system-ui,sans-serif;color:rgba(255,255,255,.9)}
+    .card{background:#161b22;border:1px solid #30363d;border-radius:12px;
+          padding:40px;width:360px;text-align:center}
+    .icon{font-size:36px;margin-bottom:16px}
+    h1{font-size:20px;font-weight:600;margin-bottom:8px;color:#58a6ff}
+    p{font-size:13px;color:rgba(255,255,255,.5);margin-bottom:24px;line-height:1.6}
+    input[type=password]{width:100%;padding:12px;background:#0d1117;
+      border:1px solid #30363d;border-radius:8px;color:rgba(255,255,255,.9);
+      font-size:18px;letter-spacing:6px;text-align:center;margin-bottom:14px;outline:none}
+    input[type=password]:focus{border-color:#58a6ff}
+    button{width:100%;padding:12px;background:#238636;color:#fff;border:none;
+           border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
+    button:hover{background:#2ea043}
+    .note{font-size:11px;color:rgba(255,255,255,.25);margin-top:18px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🔐</div>
+    <h1>GitHub MCP Proxy</h1>
+    <p>Claude.ai is requesting access to your GitHub repositories. Enter your PIN to authorize.</p>
+    <form method="POST" action="/authorize">
+      <input type="hidden" name="client_id"             value="${H(p.get("client_id") ?? "")}">
+      <input type="hidden" name="redirect_uri"          value="${H(p.get("redirect_uri") ?? "")}">
+      <input type="hidden" name="state"                 value="${H(p.get("state") ?? "")}">
+      <input type="hidden" name="code_challenge"        value="${H(p.get("code_challenge") ?? "")}">
+      <input type="hidden" name="code_challenge_method" value="${H(p.get("code_challenge_method") ?? "S256")}">
+      <input type="password" name="pin" placeholder="••••••••" autofocus autocomplete="off">
+      <button type="submit">Authorize Access</button>
+    </form>
+    <div class="note">${H(BASE_URL)}</div>
+  </div>
+</body>
+</html>`;
+
+  return new Response(html, { headers: { "Content-Type": "text/html" } });
+}
+
+async function oauthAuthorizePost(request: Request, env: Env): Promise<Response> {
+  const body = await request.formData();
+  const pin = (body.get("pin") ?? "") as string;
+
+  if (pin !== env.AUTH_PIN) {
+    return new Response("Invalid PIN — go back and try again.", {
+      status: 401,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
+
+  const code = crypto.randomUUID();
+  await env.OAUTH_KV.put(`code:${code}`, JSON.stringify({
+    client_id:             body.get("client_id")             ?? "",
+    redirect_uri:          body.get("redirect_uri")          ?? "",
+    code_challenge:        body.get("code_challenge")        ?? "",
+    code_challenge_method: body.get("code_challenge_method") ?? "S256",
+  }), { expirationTtl: CODE_TTL });
+
+  const redirect = new URL(body.get("redirect_uri") as string);
+  redirect.searchParams.set("code", code);
+  const state = body.get("state");
+  if (state) redirect.searchParams.set("state", state as string);
+
+  return Response.redirect(redirect.toString(), 302);
+}
+
+async function oauthToken(request: Request, env: Env): Promise<Response> {
+  const ct = request.headers.get("content-type") ?? "";
+  let get: (k: string) => string;
+  if (ct.includes("application/json")) {
+    const j = await request.json().catch(() => ({})) as Record<string, string>;
+    get = k => j[k] ?? "";
+  } else {
+    const params = new URLSearchParams(await request.text());
+    get = k => params.get(k) ?? "";
+  }
+
+  if (get("grant_type") !== "authorization_code")
+    return oauthJson({ error: "unsupported_grant_type" }, 400);
+
+  const stored = await env.OAUTH_KV.get(`code:${get("code")}`, "json") as {
+    client_id: string; redirect_uri: string;
+    code_challenge: string; code_challenge_method: string;
+  } | null;
+
+  if (!stored) return oauthJson({ error: "invalid_grant" }, 400);
+
+  // Verify PKCE (S256)
+  if (stored.code_challenge) {
+    const verifier = get("code_verifier");
+    if (!verifier) return oauthJson({ error: "invalid_grant" }, 400);
+    const digest = await crypto.subtle.digest(
+      "SHA-256", new TextEncoder().encode(verifier)
+    );
+    const expected = btoa(String.fromCharCode(...new Uint8Array(digest)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    if (expected !== stored.code_challenge)
+      return oauthJson({ error: "invalid_grant" }, 400);
+  }
+
+  await env.OAUTH_KV.delete(`code:${get("code")}`);
+
+  const accessToken = crypto.randomUUID() + "-" + crypto.randomUUID();
+  await env.OAUTH_KV.put(`token:${accessToken}`, JSON.stringify({
+    client_id: stored.client_id,
+    created_at: Date.now(),
+  }), { expirationTtl: TOKEN_TTL });
+
+  return oauthJson({
+    access_token: accessToken,
+    token_type:   "Bearer",
+    expires_in:   TOKEN_TTL,
+  });
+}
+
+async function oauthRevoke(request: Request, env: Env): Promise<Response> {
+  const params = new URLSearchParams(await request.text());
+  await env.OAUTH_KV.delete(`token:${params.get("token") ?? ""}`);
+  return new Response(null, { status: 200 });
+}
+
 // ── Worker entry point ────────────────────────────────────────────
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const url = new URL(request.url);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const url    = new URL(request.url);
+    const path   = url.pathname;
+    const method = request.method;
 
-    // ── Auth check ───────────────────────────────────────────────
-    // Skip for CORS preflight and health check.
-    // Accepts the secret via:
-    //   ?key=<PROXY_SECRET>  (query param — for Claude.ai connector URL)
-    //   Authorization: Bearer <PROXY_SECRET>  (header — for other clients)
-    if (env.PROXY_SECRET && request.method !== "OPTIONS" && url.pathname !== "/" && url.pathname !== "/health") {
-      const queryKey = url.searchParams.get("key") ?? "";
-      const authHeader = request.headers.get("Authorization") ?? "";
-      const valid = queryKey === env.PROXY_SECRET || authHeader === `Bearer ${env.PROXY_SECRET}`;
-      if (!valid) {
-        return new Response("Unauthorized", { status: 401 });
-      }
+    // CORS preflight — always allow, no auth required
+    if (method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin":  "*",
+          "Access-Control-Allow-Methods": "*",
+          "Access-Control-Allow-Headers": "*",
+        },
+      });
     }
 
-    // Health check
-    if (url.pathname === "/" || url.pathname === "/health") {
+    // ── OAuth endpoints (no auth required) ────────────────────────
+    if (path === "/.well-known/oauth-authorization-server" && method === "GET")
+      return oauthDiscovery();
+    if (path === "/register" && method === "POST")
+      return oauthRegister(request, env);
+    if (path === "/authorize" && method === "GET")
+      return oauthAuthorizeGet(url);
+    if (path === "/authorize" && method === "POST")
+      return oauthAuthorizePost(request, env);
+    if (path === "/token" && method === "POST")
+      return oauthToken(request, env);
+    if (path === "/revoke" && method === "POST")
+      return oauthRevoke(request, env);
+
+    // Health check (public)
+    if (path === "/" || path === "/health") {
       return new Response(
         JSON.stringify({
-          status: "ok",
-          service: "RightCraft GitHub MCP",
+          status:    "ok",
+          service:   "GitHub MCP (RightCraft + OutSystems)",
           endpoints: ["/mcp", "/sse"],
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        }
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
+    // ── Bearer token check for all MCP endpoints ──────────────────
+    const auth  = request.headers.get("Authorization") ?? "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!token || !(await env.OAUTH_KV.get(`token:${token}`))) {
+      return new Response("Unauthorized", {
+        status: 401,
+        headers: { "WWW-Authenticate": `Bearer realm="${BASE_URL}"` },
+      });
+    }
+
     // MCP endpoint (streamable HTTP — current standard)
-    if (url.pathname === "/mcp") {
+    if (path === "/mcp") {
       return GitHubMCP.serve("/mcp").fetch(request, env, ctx);
     }
 
     // SSE endpoint (deprecated but some clients still use it)
-    if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
+    if (path === "/sse" || path.startsWith("/sse/")) {
       return GitHubMCP.serve("/sse").fetch(request, env, ctx);
     }
 
