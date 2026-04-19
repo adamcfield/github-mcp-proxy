@@ -4,8 +4,8 @@ import { z } from "zod";
 
 const OWNER = "adamcfield";
 const DEFAULT_REPO = "rightcraft-io";
-const ALLOWED_REPOS = ["rightcraft-io", "Outsystems-Computer-Use"];
-const READ_ONLY_REPOS = ["Outsystems-Computer-Use"];
+const ALLOWED_REPOS = ["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"];
+const READ_ONLY_REPOS = ["Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"];
 const API = "https://api.github.com";
 
 // ── GitHub API helpers ────────────────────────────────────────────
@@ -49,7 +49,7 @@ export class GitHubMCP extends McpAgent {
       {
         path: z.string().describe("File path relative to repo root, e.g. 'src/agents/customer-care/index.ts'"),
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
         offset: z.number().optional().describe("Character offset to start reading from (for large files)"),
       },
       async ({ path, branch, repo, offset }) => {
@@ -114,7 +114,7 @@ export class GitHubMCP extends McpAgent {
         content: z.string().describe("The full file content to write"),
         message: z.string().describe("Git commit message"),
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ path, content, message, branch, repo }) => {
         if (repo && READ_ONLY_REPOS.includes(repo)) {
@@ -179,7 +179,7 @@ export class GitHubMCP extends McpAgent {
       {
         path: z.string().optional().describe("Directory path relative to repo root (defaults to root)"),
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ path, branch, repo }) => {
         const repoName = repo || DEFAULT_REPO;
@@ -228,7 +228,7 @@ export class GitHubMCP extends McpAgent {
       "Search for files or code in the RightCraft GitHub repository using GitHub's code search API.",
       {
         query: z.string().describe("Search query (code, filename, etc.)"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ query, repo }) => {
         const repoName = repo || DEFAULT_REPO;
@@ -276,7 +276,7 @@ export class GitHubMCP extends McpAgent {
       "list_branches",
       "List branches in the RightCraft GitHub repository.",
       {
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ repo }) => {
         const repoName = repo || DEFAULT_REPO;
@@ -311,7 +311,7 @@ export class GitHubMCP extends McpAgent {
       {
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
         path_prefix: z.string().optional().describe("Filter results to paths starting with this prefix, e.g. 'src/agents/'"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ branch, path_prefix, repo }) => {
         const repoName = repo || DEFAULT_REPO;
@@ -389,7 +389,7 @@ export class GitHubMCP extends McpAgent {
         state: z.enum(["open", "closed", "all"]).optional().describe("PR state filter (defaults to 'open')"),
         base: z.string().optional().describe("Filter by base branch name"),
         head: z.string().optional().describe("Filter by head branch name (format: 'user:branch' or just 'branch')"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ state, base, head, repo }) => {
         const repoName = repo || DEFAULT_REPO;
@@ -442,7 +442,7 @@ export class GitHubMCP extends McpAgent {
       "Get details of a specific pull request by number.",
       {
         pull_number: z.number().int().positive().describe("The pull request number"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, repo }) => {
         const repoName = repo || DEFAULT_REPO;
@@ -513,7 +513,7 @@ export class GitHubMCP extends McpAgent {
         head: z.string().describe("The branch containing changes (e.g. 'feature/my-feature')"),
         base: z.string().describe("The branch to merge into (e.g. 'main')"),
         draft: z.boolean().optional().describe("Create as draft PR (defaults to false)"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ title, body, head, base, draft, repo }) => {
         if (repo && READ_ONLY_REPOS.includes(repo)) {
@@ -556,7 +556,7 @@ export class GitHubMCP extends McpAgent {
         commit_title: z.string().optional().describe("Title for the merge commit (optional)"),
         commit_message: z.string().optional().describe("Extra detail for the merge commit message (optional)"),
         merge_method: z.enum(["merge", "squash", "rebase"]).optional().describe("Merge method (defaults to 'merge')"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, commit_title, commit_message, merge_method, repo }) => {
         if (repo && READ_ONLY_REPOS.includes(repo)) {
@@ -596,7 +596,7 @@ export class GitHubMCP extends McpAgent {
       "Close a pull request without merging it.",
       {
         pull_number: z.number().int().positive().describe("The pull request number to close"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, repo }) => {
         if (repo && READ_ONLY_REPOS.includes(repo)) {
@@ -633,7 +633,7 @@ export class GitHubMCP extends McpAgent {
       {
         pull_number: z.number().int().positive().describe("The pull request number"),
         body: z.string().describe("The comment text (markdown supported)"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, body, repo }) => {
         if (repo && READ_ONLY_REPOS.includes(repo)) {
@@ -670,7 +670,7 @@ export class GitHubMCP extends McpAgent {
       {
         pull_number: z.number().int().positive().describe("The pull request number"),
         reviewers: z.array(z.string()).min(1).describe("GitHub usernames to request reviews from (without the @ prefix)"),
-        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, reviewers, repo }) => {
         if (repo && READ_ONLY_REPOS.includes(repo)) {
