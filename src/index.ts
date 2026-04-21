@@ -36,14 +36,6 @@ export class GitHubMCP extends McpAgent {
     version: "1.0.0",
   });
 
-  writeAllowed: boolean = true;
-
-  async fetch(request: Request): Promise<Response> {
-    const h = request.headers.get("X-Write-Allowed");
-    if (h !== null) this.writeAllowed = h === "true";
-    return super.fetch(request);
-  }
-
   async init() {
     const pat = (this.env as Env).GITHUB_PAT;
     if (!pat) {
@@ -125,9 +117,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ path, content, message, branch, repo }) => {
-        if (!this.writeAllowed) {
+        if (repo && READ_ONLY_REPOS.includes(repo)) {
           return {
-            content: [{ type: "text" as const, text: "Write access denied: this connector is configured as read-only." }],
+            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
             isError: true,
           };
         }
@@ -524,9 +516,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ title, body, head, base, draft, repo }) => {
-        if (!this.writeAllowed) {
+        if (repo && READ_ONLY_REPOS.includes(repo)) {
           return {
-            content: [{ type: "text" as const, text: "Write access denied: this connector is configured as read-only." }],
+            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
             isError: true,
           };
         }
@@ -567,9 +559,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, commit_title, commit_message, merge_method, repo }) => {
-        if (!this.writeAllowed) {
+        if (repo && READ_ONLY_REPOS.includes(repo)) {
           return {
-            content: [{ type: "text" as const, text: "Write access denied: this connector is configured as read-only." }],
+            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
             isError: true,
           };
         }
@@ -607,9 +599,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, repo }) => {
-        if (!this.writeAllowed) {
+        if (repo && READ_ONLY_REPOS.includes(repo)) {
           return {
-            content: [{ type: "text" as const, text: "Write access denied: this connector is configured as read-only." }],
+            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
             isError: true,
           };
         }
@@ -644,9 +636,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, body, repo }) => {
-        if (!this.writeAllowed) {
+        if (repo && READ_ONLY_REPOS.includes(repo)) {
           return {
-            content: [{ type: "text" as const, text: "Write access denied: this connector is configured as read-only." }],
+            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
             isError: true,
           };
         }
@@ -681,9 +673,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, reviewers, repo }) => {
-        if (!this.writeAllowed) {
+        if (repo && READ_ONLY_REPOS.includes(repo)) {
           return {
-            content: [{ type: "text" as const, text: "Write access denied: this connector is configured as read-only." }],
+            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
             isError: true,
           };
         }
@@ -800,7 +792,6 @@ function oauthAuthorizeGet(url: URL): Response {
       <input type="hidden" name="state"                 value="${H(p.get("state") ?? "")}">
       <input type="hidden" name="code_challenge"        value="${H(p.get("code_challenge") ?? "")}">
       <input type="hidden" name="code_challenge_method" value="${H(p.get("code_challenge_method") ?? "S256")}">
-      <input type="hidden" name="scope"                 value="${H(p.get("scope") ?? "")}">
       <input type="password" name="pin" placeholder="••••••••" autofocus autocomplete="off">
       <button type="submit">Authorize Access</button>
     </form>
@@ -829,7 +820,6 @@ async function oauthAuthorizePost(request: Request, env: Env): Promise<Response>
     redirect_uri:          body.get("redirect_uri")          ?? "",
     code_challenge:        body.get("code_challenge")        ?? "",
     code_challenge_method: body.get("code_challenge_method") ?? "S256",
-    scope:                 body.get("scope")                 ?? "",
   }), { expirationTtl: CODE_TTL });
 
   const redirect = new URL(body.get("redirect_uri") as string);
@@ -857,7 +847,6 @@ async function oauthToken(request: Request, env: Env): Promise<Response> {
   const stored = await env.OAUTH_KV.get(`code:${get("code")}`, "json") as {
     client_id: string; redirect_uri: string;
     code_challenge: string; code_challenge_method: string;
-    scope: string;
   } | null;
 
   if (!stored) return oauthJson({ error: "invalid_grant" }, 400);
@@ -877,12 +866,10 @@ async function oauthToken(request: Request, env: Env): Promise<Response> {
 
   await env.OAUTH_KV.delete(`code:${get("code")}`);
 
-  const writeAllowed = (stored.scope ?? "").split(/\s+/).includes("write");
   const accessToken = crypto.randomUUID() + "-" + crypto.randomUUID();
   await env.OAUTH_KV.put(`token:${accessToken}`, JSON.stringify({
-    client_id:     stored.client_id,
-    created_at:    Date.now(),
-    write_allowed: writeAllowed,
+    client_id: stored.client_id,
+    created_at: Date.now(),
   }), { expirationTtl: TOKEN_TTL });
 
   return oauthJson({
@@ -947,29 +934,21 @@ export default {
     // ── Bearer token check for all MCP endpoints ──────────────────
     const auth  = request.headers.get("Authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const rawToken = token ? await env.OAUTH_KV.get(`token:${token}`) : null;
-    if (!rawToken) {
+    if (!token || !(await env.OAUTH_KV.get(`token:${token}`))) {
       return new Response("Unauthorized", {
         status: 401,
         headers: { "WWW-Authenticate": `Bearer realm="${BASE_URL}"` },
       });
     }
-    const tokenData = JSON.parse(rawToken) as { write_allowed?: boolean };
-    const writeAllowed = tokenData.write_allowed ?? true;  // existing tokens default to full write
-
-    // Inject write permission as a header so the Durable Object can read it
-    const newHeaders = new Headers(request.headers);
-    newHeaders.set("X-Write-Allowed", String(writeAllowed));
-    const authedRequest = new Request(request, { headers: newHeaders });
 
     // MCP endpoint (streamable HTTP — current standard)
     if (path === "/mcp") {
-      return GitHubMCP.serve("/mcp").fetch(authedRequest, env, ctx);
+      return GitHubMCP.serve("/mcp").fetch(request, env, ctx);
     }
 
     // SSE endpoint (deprecated but some clients still use it)
     if (path === "/sse" || path.startsWith("/sse/")) {
-      return GitHubMCP.serve("/sse").fetch(authedRequest, env, ctx);
+      return GitHubMCP.serve("/sse").fetch(request, env, ctx);
     }
 
     return new Response("Not found", { status: 404 });
