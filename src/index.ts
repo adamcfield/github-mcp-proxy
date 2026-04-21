@@ -5,7 +5,7 @@ import { z } from "zod";
 const OWNER = "adamcfield";
 const DEFAULT_REPO = "rightcraft-io";
 const ALLOWED_REPOS = ["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"];
-const READ_ONLY_REPOS = ["Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"];
+const READ_ONLY_REPOS: string[] = [];
 const API = "https://api.github.com";
 
 // ── GitHub API helpers ────────────────────────────────────────────
