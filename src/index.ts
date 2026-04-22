@@ -45,7 +45,7 @@ export class GitHubMCP extends McpAgent {
     // ── read_file ──────────────────────────────────────────────
     this.server.tool(
       "read_file",
-      "Read a file from the RightCraft GitHub repository. Returns the file content as text. Use for any file: source code, markdown, JSON, config, etc.",
+      "Read a file from the GitHub repository. Returns the file content as text. Use for any file: source code, markdown, JSON, config, etc.",
       {
         path: z.string().describe("File path relative to repo root, e.g. 'src/agents/customer-care/index.ts'"),
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
@@ -158,7 +158,7 @@ export class GitHubMCP extends McpAgent {
 
         const result = (await res.json()) as { commit?: { sha?: string } };
         return {
-          content: [{ type: "text" as const, text: `Deleted: ${path} (commit: ${result.commit?.sha?.slice(0, 7) || "unknown"})` }],
+          content: [{ type: "text" as const, text: `Deleted: ${repoName}/${path} (commit: ${result.commit?.sha?.slice(0, 7) || "unknown"})` }],
         };
       }
     );
@@ -166,7 +166,7 @@ export class GitHubMCP extends McpAgent {
     // ── write_file ─────────────────────────────────────────────
     this.server.tool(
       "write_file",
-      "Create or update a file in the RightCraft GitHub repository. Commits directly to the specified branch.",
+      "Create or update a file in the GitHub repository. Commits directly to the specified branch.",
       {
         path: z.string().describe("File path relative to repo root"),
         content: z.string().describe("The full file content to write"),
@@ -218,7 +218,7 @@ export class GitHubMCP extends McpAgent {
           content: [
             {
               type: "text" as const,
-              text: `File ${sha ? "updated" : "created"}: ${path} (commit: ${result.commit?.sha?.slice(0, 7) || "unknown"})`,
+              text: `File ${sha ? "updated" : "created"}: ${repoName}/${path} (commit: ${result.commit?.sha?.slice(0, 7) || "unknown"})`,
             },
           ],
         };
@@ -228,7 +228,7 @@ export class GitHubMCP extends McpAgent {
     // ── list_files ─────────────────────────────────────────────
     this.server.tool(
       "list_files",
-      "List files and directories in a path within the RightCraft GitHub repository.",
+      "List files and directories in a path within the GitHub repository.",
       {
         path: z.string().optional().describe("Directory path relative to repo root (defaults to root)"),
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
@@ -278,7 +278,7 @@ export class GitHubMCP extends McpAgent {
     // ── search_files ───────────────────────────────────────────
     this.server.tool(
       "search_files",
-      "Search for files or code in the RightCraft GitHub repository using GitHub's code search API.",
+      "Search for files or code in the GitHub repository using GitHub's code search API.",
       {
         query: z.string().describe("Search query (code, filename, etc.)"),
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
@@ -327,7 +327,7 @@ export class GitHubMCP extends McpAgent {
     // ── list_branches ──────────────────────────────────────────
     this.server.tool(
       "list_branches",
-      "List branches in the RightCraft GitHub repository.",
+      "List branches in the GitHub repository.",
       {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
@@ -360,7 +360,7 @@ export class GitHubMCP extends McpAgent {
     // ── get_file_tree ──────────────────────────────────────────
     this.server.tool(
       "get_file_tree",
-      "Get the full recursive file tree of the RightCraft GitHub repository. Useful for understanding project structure.",
+      "Get the full recursive file tree of the GitHub repository. Useful for understanding project structure.",
       {
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
         path_prefix: z.string().optional().describe("Filter results to paths starting with this prefix, e.g. 'src/agents/'"),
@@ -437,7 +437,7 @@ export class GitHubMCP extends McpAgent {
     // ── list_prs ───────────────────────────────────────────────
     this.server.tool(
       "list_prs",
-      "List pull requests for the RightCraft GitHub repository.",
+      "List pull requests for the GitHub repository.",
       {
         state: z.enum(["open", "closed", "all"]).optional().describe("PR state filter (defaults to 'open')"),
         base: z.string().optional().describe("Filter by base branch name"),
@@ -559,7 +559,7 @@ export class GitHubMCP extends McpAgent {
     // ── create_pr ──────────────────────────────────────────────
     this.server.tool(
       "create_pr",
-      "Create a new pull request in the RightCraft GitHub repository.",
+      "Create a new pull request in the GitHub repository.",
       {
         title: z.string().describe("Title of the pull request"),
         body: z.string().optional().describe("Body/description of the pull request (markdown supported)"),
@@ -590,7 +590,7 @@ export class GitHubMCP extends McpAgent {
 
         const pr = (await res.json()) as { number: number; html_url: string; title: string };
         return {
-          content: [{ type: "text" as const, text: `PR #${pr.number} created: ${pr.title}\n${pr.html_url}` }],
+          content: [{ type: "text" as const, text: `PR #${pr.number} created in ${repoName}: ${pr.title}\n${pr.html_url}` }],
         };
       }
     );
