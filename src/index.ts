@@ -117,18 +117,13 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ path, content, message, branch, repo }) => {
-        if (repo && READ_ONLY_REPOS.includes(repo)) {
-          return {
-            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
-            isError: true,
-          };
-        }
+        const repoName = repo || DEFAULT_REPO;
         const ref = branch || "main";
 
         // Check if file exists to get its SHA (needed for updates)
         let sha: string | undefined;
         const existing = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/contents/${encodeURIComponent(path)}?ref=${ref}`,
+          `/repos/${OWNER}/${repoName}/contents/${encodeURIComponent(path)}?ref=${ref}`,
           pat
         );
         if (existing.ok) {
@@ -144,7 +139,7 @@ export class GitHubMCP extends McpAgent {
         if (sha) body.sha = sha;
 
         const res = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/contents/${encodeURIComponent(path)}`,
+          `/repos/${OWNER}/${repoName}/contents/${encodeURIComponent(path)}`,
           pat,
           {
             method: "PUT",
@@ -516,14 +511,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ title, body, head, base, draft, repo }) => {
-        if (repo && READ_ONLY_REPOS.includes(repo)) {
-          return {
-            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
-            isError: true,
-          };
-        }
+        const repoName = repo || DEFAULT_REPO;
         const res = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/pulls`,
+          `/repos/${OWNER}/${repoName}/pulls`,
           pat,
           {
             method: "POST",
@@ -559,18 +549,13 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, commit_title, commit_message, merge_method, repo }) => {
-        if (repo && READ_ONLY_REPOS.includes(repo)) {
-          return {
-            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
-            isError: true,
-          };
-        }
+        const repoName = repo || DEFAULT_REPO;
         const body: Record<string, string> = { merge_method: merge_method || "merge" };
         if (commit_title) body.commit_title = commit_title;
         if (commit_message) body.commit_message = commit_message;
 
         const res = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/pulls/${pull_number}/merge`,
+          `/repos/${OWNER}/${repoName}/pulls/${pull_number}/merge`,
           pat,
           { method: "PUT", body: JSON.stringify(body) }
         );
@@ -599,14 +584,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, repo }) => {
-        if (repo && READ_ONLY_REPOS.includes(repo)) {
-          return {
-            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
-            isError: true,
-          };
-        }
+        const repoName = repo || DEFAULT_REPO;
         const res = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/pulls/${pull_number}`,
+          `/repos/${OWNER}/${repoName}/pulls/${pull_number}`,
           pat,
           { method: "PATCH", body: JSON.stringify({ state: "closed" }) }
         );
@@ -636,14 +616,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, body, repo }) => {
-        if (repo && READ_ONLY_REPOS.includes(repo)) {
-          return {
-            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
-            isError: true,
-          };
-        }
+        const repoName = repo || DEFAULT_REPO;
         const res = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/issues/${pull_number}/comments`,
+          `/repos/${OWNER}/${repoName}/issues/${pull_number}/comments`,
           pat,
           { method: "POST", body: JSON.stringify({ body }) }
         );
@@ -673,14 +648,9 @@ export class GitHubMCP extends McpAgent {
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
       },
       async ({ pull_number, reviewers, repo }) => {
-        if (repo && READ_ONLY_REPOS.includes(repo)) {
-          return {
-            content: [{ type: "text" as const, text: `Write operations are not permitted on ${repo}. This repository is read-only via this proxy.` }],
-            isError: true,
-          };
-        }
+        const repoName = repo || DEFAULT_REPO;
         const res = await ghFetch(
-          `/repos/${OWNER}/${DEFAULT_REPO}/pulls/${pull_number}/requested_reviewers`,
+          `/repos/${OWNER}/${repoName}/pulls/${pull_number}/requested_reviewers`,
           pat,
           { method: "POST", body: JSON.stringify({ reviewers }) }
         );
