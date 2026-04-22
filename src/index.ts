@@ -105,6 +105,64 @@ export class GitHubMCP extends McpAgent {
       }
     );
 
+    // ── delete_file ────────────────────────────────────────────
+    this.server.tool(
+      "delete_file",
+      "Delete a file from a GitHub repository. Looks up the file's current SHA automatically, then commits the deletion.",
+      {
+        path: z.string().describe("File path relative to repo root, e.g. 'pending/my-patch.patch'"),
+        message: z.string().describe("Git commit message for the deletion"),
+        branch: z.string().optional().describe("Branch name (defaults to 'main')"),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name. Defaults to rightcraft-io."),
+      },
+      async ({ path, message, branch, repo }) => {
+        const repoName = repo || DEFAULT_REPO;
+        const ref = branch || "main";
+
+        // Must fetch current SHA before deleting
+        const existing = await ghFetch(
+          `/repos/${OWNER}/${repoName}/contents/${encodeURIComponent(path)}?ref=${ref}`,
+          pat
+        );
+        if (!existing.ok) {
+          const err = await existing.text();
+          return {
+            content: [{ type: "text" as const, text: `Error fetching file SHA (${existing.status}): ${err}` }],
+            isError: true,
+          };
+        }
+        const data = (await existing.json()) as { sha?: string };
+        if (!data.sha) {
+          return {
+            content: [{ type: "text" as const, text: `Could not retrieve SHA for '${path}' — cannot delete.` }],
+            isError: true,
+          };
+        }
+
+        const res = await ghFetch(
+          `/repos/${OWNER}/${repoName}/contents/${encodeURIComponent(path)}`,
+          pat,
+          {
+            method: "DELETE",
+            body: JSON.stringify({ message, sha: data.sha, branch: ref }),
+          }
+        );
+
+        if (!res.ok) {
+          const err = await res.text();
+          return {
+            content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
+            isError: true,
+          };
+        }
+
+        const result = (await res.json()) as { commit?: { sha?: string } };
+        return {
+          content: [{ type: "text" as const, text: `Deleted: ${path} (commit: ${result.commit?.sha?.slice(0, 7) || "unknown"})` }],
+        };
+      }
+    );
+
     // ── write_file ─────────────────────────────────────────────
     this.server.tool(
       "write_file",
