@@ -4,8 +4,7 @@ import { z } from "zod";
 
 const OWNER = "adamcfield";
 const DEFAULT_REPO = "rightcraft-io";
-const ALLOWED_REPOS = ["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"];
-const READ_ONLY_REPOS: string[] = [];
+const ALLOWED_REPOS = ["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"] as const;
 const API = "https://api.github.com";
 
 // ── GitHub API helpers ────────────────────────────────────────────
@@ -16,16 +15,39 @@ async function ghFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const url = path.startsWith("http") ? path : `${API}${path}`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${pat}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "github-mcp-worker/1.0",
+  };
+  // GitHub lenient about missing Content-Type, but spec-correct to send it
+  if (options.body) {
+    headers["Content-Type"] = "application/json";
+  }
   return fetch(url, {
     ...options,
     headers: {
-      Authorization: `Bearer ${pat}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "github-mcp-worker/1.0",
+      ...headers,
       ...(options.headers || {}),
     },
   });
+}
+
+// Format a GitHub-error response with rate-limit awareness
+async function ghErrorText(res: Response): Promise<string> {
+  const remaining = res.headers.get("X-RateLimit-Remaining");
+  const reset     = res.headers.get("X-RateLimit-Reset");
+  const retry     = res.headers.get("Retry-After");
+  const body      = await res.text();
+  if (res.status === 403 && remaining === "0" && reset) {
+    const when = new Date(Number(reset) * 1000).toISOString();
+    return `Rate limit exceeded (resets at ${when}). ${body}`;
+  }
+  if (res.status === 429) {
+    return `Too Many Requests${retry ? ` (retry after ${retry}s)` : ""}. ${body}`;
+  }
+  return body;
 }
 
 // ── MCP Agent ─────────────────────────────────────────────────────
@@ -62,7 +84,7 @@ export class GitHubMCP extends McpAgent {
           );
 
           if (!res.ok) {
-            const err = await res.text();
+            const err = await ghErrorText(res);
             return {
               content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
               isError: true,
@@ -125,7 +147,7 @@ export class GitHubMCP extends McpAgent {
           pat
         );
         if (!existing.ok) {
-          const err = await existing.text();
+          const err = await ghErrorText(existing);
           return {
             content: [{ type: "text" as const, text: `Error fetching file SHA (${existing.status}): ${err}` }],
             isError: true,
@@ -149,7 +171,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -185,13 +207,27 @@ export class GitHubMCP extends McpAgent {
           pat
         );
         if (existing.ok) {
-          const data = (await existing.json()) as { sha?: string };
-          sha = data.sha;
+          const data = await existing.json();
+          // When path is a directory, GitHub returns an array; reject to avoid opaque 422
+          if (Array.isArray(data)) {
+            return {
+              content: [{ type: "text" as const, text: `Path '${path}' is a directory in ${repoName}, not a file. write_file requires a file path.` }],
+              isError: true,
+            };
+          }
+          sha = (data as { sha?: string }).sha;
         }
+
+        // UTF-8 → bytes → Latin-1 binary string → base64.
+        // This is symmetric with read_file's TextDecoder flow and avoids the deprecated `unescape`.
+        const bytes = new TextEncoder().encode(content);
+        let binary = "";
+        for (const b of bytes) binary += String.fromCharCode(b);
+        const contentB64 = btoa(binary);
 
         const body: Record<string, string> = {
           message,
-          content: btoa(unescape(encodeURIComponent(content))),
+          content: contentB64,
           branch: ref,
         };
         if (sha) body.sha = sha;
@@ -206,7 +242,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -245,7 +281,7 @@ export class GitHubMCP extends McpAgent {
         const res = await ghFetch(url, pat);
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -291,7 +327,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -339,7 +375,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -456,7 +492,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -505,7 +541,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -619,7 +655,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -650,7 +686,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -682,7 +718,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -714,7 +750,7 @@ export class GitHubMCP extends McpAgent {
         );
 
         if (!res.ok) {
-          const err = await res.text();
+          const err = await ghErrorText(res);
           return {
             content: [{ type: "text" as const, text: `Error ${res.status}: ${err}` }],
             isError: true,
@@ -779,8 +815,61 @@ async function oauthRegister(request: Request, env: Env): Promise<Response> {
   return oauthJson(client, 201);
 }
 
-function oauthAuthorizeGet(url: URL): Response {
+interface OAuthClient {
+  client_id: string;
+  client_name: string;
+  redirect_uris: string[];
+  grant_types: string[];
+  response_types: string[];
+  token_endpoint_auth_method: string;
+  created_at: number;
+}
+
+async function getClient(env: Env, clientId: string): Promise<OAuthClient | null> {
+  if (!clientId) return null;
+  return await env.OAUTH_KV.get(`client:${clientId}`, "json") as OAuthClient | null;
+}
+
+function oauthErrorPage(title: string, detail: string, status = 400): Response {
+  const H = (s: string) => String(s)
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${H(title)}</title>
+<style>body{font-family:system-ui;max-width:520px;margin:60px auto;padding:20px;background:#0d1117;color:rgba(255,255,255,.9)}
+h1{color:#f85149;font-size:18px}p{color:rgba(255,255,255,.7);line-height:1.5}</style></head>
+<body><h1>${H(title)}</h1><p>${H(detail)}</p></body></html>`;
+  return new Response(html, { status, headers: { "Content-Type": "text/html" } });
+}
+
+async function oauthAuthorizeGet(url: URL, env: Env): Promise<Response> {
   const p = url.searchParams;
+  const clientId     = p.get("client_id")      ?? "";
+  const redirectUri  = p.get("redirect_uri")   ?? "";
+  const codeChallenge = p.get("code_challenge") ?? "";
+
+  // Validate client exists
+  const client = await getClient(env, clientId);
+  if (!client) {
+    return oauthErrorPage("Invalid client", "The client_id is not registered.", 400);
+  }
+
+  // Validate redirect_uri is one of the registered URIs (exact match)
+  if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
+    return oauthErrorPage(
+      "Invalid redirect_uri",
+      "The redirect_uri does not match any URI registered for this client.",
+      400
+    );
+  }
+
+  // Require PKCE (OAuth 2.1 mandate for public clients)
+  if (!codeChallenge) {
+    return oauthErrorPage(
+      "PKCE required",
+      "This authorization server requires code_challenge (PKCE S256). Missing from request.",
+      400
+    );
+  }
+
   const H = (s: string) => String(s)
     .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
@@ -833,7 +922,31 @@ function oauthAuthorizeGet(url: URL): Response {
 
 async function oauthAuthorizePost(request: Request, env: Env): Promise<Response> {
   const body = await request.formData();
-  const pin = (body.get("pin") ?? "") as string;
+  const clientId     = (body.get("client_id")             ?? "") as string;
+  const redirectUri  = (body.get("redirect_uri")          ?? "") as string;
+  const codeChallenge = (body.get("code_challenge")       ?? "") as string;
+  const codeChallengeMethod = (body.get("code_challenge_method") ?? "S256") as string;
+  const state        = (body.get("state")                 ?? "") as string;
+  const pin          = (body.get("pin")                   ?? "") as string;
+
+  // Re-validate client + redirect_uri server-side (never trust the form alone)
+  const client = await getClient(env, clientId);
+  if (!client) {
+    return oauthErrorPage("Invalid client", "The client_id is not registered.", 400);
+  }
+  if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
+    return oauthErrorPage(
+      "Invalid redirect_uri",
+      "The redirect_uri does not match any URI registered for this client.",
+      400
+    );
+  }
+  if (!codeChallenge) {
+    return oauthErrorPage("PKCE required", "code_challenge is mandatory.", 400);
+  }
+  if (codeChallengeMethod !== "S256") {
+    return oauthErrorPage("Unsupported PKCE method", "Only S256 is supported.", 400);
+  }
 
   if (pin !== env.AUTH_PIN) {
     return new Response("Invalid PIN — go back and try again.", {
@@ -844,16 +957,16 @@ async function oauthAuthorizePost(request: Request, env: Env): Promise<Response>
 
   const code = crypto.randomUUID();
   await env.OAUTH_KV.put(`code:${code}`, JSON.stringify({
-    client_id:             body.get("client_id")             ?? "",
-    redirect_uri:          body.get("redirect_uri")          ?? "",
-    code_challenge:        body.get("code_challenge")        ?? "",
-    code_challenge_method: body.get("code_challenge_method") ?? "S256",
+    client_id:             clientId,
+    redirect_uri:          redirectUri,
+    code_challenge:        codeChallenge,
+    code_challenge_method: codeChallengeMethod,
   }), { expirationTtl: CODE_TTL });
 
-  const redirect = new URL(body.get("redirect_uri") as string);
+  // redirectUri is now known to be a registered URI, safe to redirect
+  const redirect = new URL(redirectUri);
   redirect.searchParams.set("code", code);
-  const state = body.get("state");
-  if (state) redirect.searchParams.set("state", state as string);
+  if (state) redirect.searchParams.set("state", state);
 
   return Response.redirect(redirect.toString(), 302);
 }
@@ -872,27 +985,43 @@ async function oauthToken(request: Request, env: Env): Promise<Response> {
   if (get("grant_type") !== "authorization_code")
     return oauthJson({ error: "unsupported_grant_type" }, 400);
 
-  const stored = await env.OAUTH_KV.get(`code:${get("code")}`, "json") as {
+  const code = get("code");
+  if (!code) return oauthJson({ error: "invalid_grant", error_description: "missing code" }, 400);
+
+  const stored = await env.OAUTH_KV.get(`code:${code}`, "json") as {
     client_id: string; redirect_uri: string;
     code_challenge: string; code_challenge_method: string;
   } | null;
 
-  if (!stored) return oauthJson({ error: "invalid_grant" }, 400);
+  if (!stored) return oauthJson({ error: "invalid_grant", error_description: "unknown code" }, 400);
 
-  // Verify PKCE (S256)
-  if (stored.code_challenge) {
-    const verifier = get("code_verifier");
-    if (!verifier) return oauthJson({ error: "invalid_grant" }, 400);
-    const digest = await crypto.subtle.digest(
-      "SHA-256", new TextEncoder().encode(verifier)
-    );
-    const expected = btoa(String.fromCharCode(...new Uint8Array(digest)))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    if (expected !== stored.code_challenge)
-      return oauthJson({ error: "invalid_grant" }, 400);
+  // Burn the code immediately — single-use, even if validation below fails
+  await env.OAUTH_KV.delete(`code:${code}`);
+
+  // Verify client_id and redirect_uri match what was bound to the code (RFC 6749 §4.1.3)
+  if (get("client_id") !== stored.client_id) {
+    return oauthJson({ error: "invalid_grant", error_description: "client_id mismatch" }, 400);
+  }
+  if (get("redirect_uri") !== stored.redirect_uri) {
+    return oauthJson({ error: "invalid_grant", error_description: "redirect_uri mismatch" }, 400);
   }
 
-  await env.OAUTH_KV.delete(`code:${get("code")}`);
+  // PKCE is mandatory — challenge must have been stored, verifier must verify
+  if (!stored.code_challenge) {
+    return oauthJson({ error: "invalid_grant", error_description: "missing challenge" }, 400);
+  }
+  const verifier = get("code_verifier");
+  if (!verifier) {
+    return oauthJson({ error: "invalid_grant", error_description: "missing code_verifier" }, 400);
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256", new TextEncoder().encode(verifier)
+  );
+  const expected = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  if (expected !== stored.code_challenge) {
+    return oauthJson({ error: "invalid_grant", error_description: "PKCE verification failed" }, 400);
+  }
 
   const accessToken = crypto.randomUUID() + "-" + crypto.randomUUID();
   await env.OAUTH_KV.put(`token:${accessToken}`, JSON.stringify({
@@ -939,7 +1068,7 @@ export default {
     if (path === "/register" && method === "POST")
       return oauthRegister(request, env);
     if (path === "/authorize" && method === "GET")
-      return oauthAuthorizeGet(url);
+      return oauthAuthorizeGet(url, env);
     if (path === "/authorize" && method === "POST")
       return oauthAuthorizePost(request, env);
     if (path === "/token" && method === "POST")
