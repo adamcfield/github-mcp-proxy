@@ -73,8 +73,9 @@ export class GitHubMCP extends McpAgent {
         branch: z.string().optional().describe("Branch name (defaults to 'main')"),
         repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).optional().describe("Repository name (default: rightcraft-io)"),
         offset: z.number().optional().describe("Character offset to start reading from (for large files)"),
+        max_bytes: z.number().optional().describe("Max characters to return in this chunk. Default 200000 (~200 KB). Hard cap 500000 (~500 KB). Beyond this, clone locally."),
       },
-      async ({ path, branch, repo, offset }) => {
+      async ({ path, branch, repo, offset, max_bytes }) => {
         try {
           const repoName = repo || DEFAULT_REPO;
           const ref = branch || "main";
@@ -109,11 +110,16 @@ export class GitHubMCP extends McpAgent {
           const b64 = data.content.replace(/\s/g, "");
           const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
           const decoded = new TextDecoder("utf-8").decode(bytes);
-          const CHUNK = 50000;
-          const start = offset || 0;
-          const slice = decoded.slice(start, start + CHUNK);
-          const suffix = decoded.length > start + CHUNK
-            ? `\n\n[File truncated at ${start + CHUNK} chars. ${decoded.length} chars total. Use path + offset params to read further sections.]`
+
+          // Chunking: default 200 KB, hard cap 500 KB (protects UI + context budget).
+          const DEFAULT_CHUNK = 200_000;
+          const HARD_CAP      = 500_000;
+          const requested = typeof max_bytes === "number" && max_bytes > 0 ? max_bytes : DEFAULT_CHUNK;
+          const chunk = Math.min(requested, HARD_CAP);
+          const start = typeof offset === "number" && offset > 0 ? offset : 0;
+          const slice = decoded.slice(start, start + chunk);
+          const suffix = decoded.length > start + chunk
+            ? `\n\n[File truncated at ${start + chunk} chars. ${decoded.length} chars total. Use offset=${start + chunk} to continue, or max_bytes up to ${HARD_CAP} for larger chunks.]`
             : (start > 0 ? `\n\n[End of file. ${decoded.length} chars total.]` : "");
           return {
             content: [{ type: "text" as const, text: slice + suffix }],
