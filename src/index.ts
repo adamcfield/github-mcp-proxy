@@ -675,6 +675,115 @@ export class GitHubMCP extends McpAgent {
       }
     );
 
+    // ── update_pull_request ────────────────────────────────────
+    this.server.tool(
+      "update_pull_request",
+      "Update a pull request: change title, body, base branch, state (open/closed), maintainer permissions, and/or toggle draft ↔ ready-for-review. Pass only the fields you want to change.",
+      {
+        pull_number: z.number().int().positive().describe("The pull request number to update"),
+        repo: z.enum(["rightcraft-io", "Outsystems-Computer-Use", "Outsystems-Computer-Use-transfer"]).describe("Target repository — required"),
+        title: z.string().optional().describe("New PR title"),
+        body: z.string().optional().describe("New PR body / description (markdown)"),
+        base: z.string().optional().describe("New base branch (changes the merge target)"),
+        state: z.enum(["open", "closed"]).optional().describe("Open or close. To merge, use merge_pr instead."),
+        draft: z.boolean().optional().describe("true = convert to draft, false = mark ready-for-review. Uses GraphQL since REST PATCH does not support this."),
+        maintainer_can_modify: z.boolean().optional().describe("Allow upstream maintainers to push to the head branch."),
+      },
+      async ({ pull_number, repo, title, body, base, state, draft, maintainer_can_modify }) => {
+        const repoName = repo;
+        const updates: string[] = [];
+        let nodeId: string | undefined;
+
+        // Step 1: REST PATCH for non-draft fields (if any specified)
+        const restBody: Record<string, unknown> = {};
+        if (title  !== undefined) restBody.title = title;
+        if (body   !== undefined) restBody.body  = body;
+        if (base   !== undefined) restBody.base  = base;
+        if (state  !== undefined) restBody.state = state;
+        if (maintainer_can_modify !== undefined) restBody.maintainer_can_modify = maintainer_can_modify;
+
+        if (Object.keys(restBody).length > 0) {
+          const res = await ghFetch(
+            `/repos/${OWNER}/${repoName}/pulls/${pull_number}`,
+            pat,
+            { method: "PATCH", body: JSON.stringify(restBody) }
+          );
+          if (!res.ok) {
+            const err = await ghErrorText(res);
+            return {
+              content: [{ type: "text" as const, text: `Error ${res.status} on PATCH: ${err}` }],
+              isError: true,
+            };
+          }
+          const pr = (await res.json()) as { node_id?: string };
+          nodeId = pr.node_id;
+          updates.push(`updated ${Object.keys(restBody).join(", ")}`);
+        }
+
+        // Step 2: GraphQL for draft↔ready toggle (if specified)
+        if (draft !== undefined) {
+          // Need node_id; fetch it if PATCH didn't supply it
+          if (!nodeId) {
+            const fetchRes = await ghFetch(
+              `/repos/${OWNER}/${repoName}/pulls/${pull_number}`,
+              pat
+            );
+            if (!fetchRes.ok) {
+              const err = await ghErrorText(fetchRes);
+              return {
+                content: [{ type: "text" as const, text: `Error ${fetchRes.status} fetching PR for draft toggle: ${err}` }],
+                isError: true,
+              };
+            }
+            const pr = (await fetchRes.json()) as { node_id?: string };
+            nodeId = pr.node_id;
+          }
+          if (!nodeId) {
+            return {
+              content: [{ type: "text" as const, text: "Could not retrieve PR node_id required for draft toggle." }],
+              isError: true,
+            };
+          }
+
+          const mutation = draft
+            ? `mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`
+            : `mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`;
+
+          const gqlRes = await ghFetch(
+            "/graphql",
+            pat,
+            { method: "POST", body: JSON.stringify({ query: mutation, variables: { id: nodeId } }) }
+          );
+          if (!gqlRes.ok) {
+            const err = await ghErrorText(gqlRes);
+            return {
+              content: [{ type: "text" as const, text: `Error ${gqlRes.status} on draft toggle: ${err}` }],
+              isError: true,
+            };
+          }
+          const gqlData = (await gqlRes.json()) as { errors?: Array<{ message: string }> };
+          if (gqlData.errors && gqlData.errors.length > 0) {
+            return {
+              content: [{ type: "text" as const, text: `GraphQL error on draft toggle: ${gqlData.errors.map(e => e.message).join("; ")}` }],
+              isError: true,
+            };
+          }
+          updates.push(draft ? "marked as draft" : "marked ready for review");
+        }
+
+        if (updates.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No fields specified to update. Pass at least one of: title, body, base, state, draft, maintainer_can_modify." }],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `PR #${pull_number} in ${repoName}: ${updates.join("; ")}` }],
+        };
+      }
+    );
+
     // ── close_pr ───────────────────────────────────────────────
     this.server.tool(
       "close_pr",
